@@ -1,0 +1,8 @@
+{
+	"admin/status/sacnmon": {
+		"title": "SACNMON",
+		"order": 80,
+		"action": { "type": "view", "path": "sacnmon" },
+		"depends": { "acl": [ "luci-app-sacn-monitor" ] }
+	}
+}

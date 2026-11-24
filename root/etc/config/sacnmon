@@ -1,0 +1,2 @@
+config monitor 'capture'
+	option interface 'br-lan'

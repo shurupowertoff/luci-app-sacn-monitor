@@ -1,0 +1,19 @@
+{
+	"luci-app-sacn-monitor": {
+		"description": "Access SACNMON",
+		"read": {
+			"ubus": {
+				"sacnmon": [ "stats" ],
+				"sacnmon.control": [ "status" ],
+				"luci-rpc": [ "getNetworkDevices" ]
+			},
+			"uci": [ "sacnmon" ]
+		},
+		"write": {
+			"ubus": {
+				"sacnmon.control": [ "start", "stop", "enable", "disable" ]
+			},
+			"uci": [ "sacnmon" ]
+		}
+	}
+}

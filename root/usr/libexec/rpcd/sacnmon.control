@@ -1,0 +1,28 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-only
+
+case "$1" in
+	list)
+		printf '%s\n' '{"status":{},"start":{},"stop":{},"enable":{},"disable":{}}'
+		;;
+	call)
+		case "$2" in
+			status)
+				enabled=false
+				running=false
+				/etc/init.d/sacnmon enabled && enabled=true
+				/etc/init.d/sacnmon running && running=true
+				printf '{"enabled":%s,"running":%s}\n' "$enabled" "$running"
+				;;
+			start|stop|enable|disable)
+				if /etc/init.d/sacnmon "$2" >/dev/null 2>&1; then
+					printf '%s\n' '{"ok":true}'
+				else
+					printf '%s\n' '{"ok":false}'
+				fi
+				;;
+			*) exit 1 ;;
+		esac
+		;;
+	*) exit 1 ;;
+esac
