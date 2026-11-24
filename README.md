@@ -4,14 +4,14 @@
 
 ## Сборка
 
-GitHub Actions запускает тесты и собирает APK с официальным SDK OpenWrt. ZIP с APK и его SHA-256 публикуется в артефактах запуска. Для локальной сборки на x86_64 Linux установите инструменты из шага **Install SDK prerequisites** в [workflow](.github/workflows/build.yml). Нужны доступ к серверу загрузок и feeds OpenWrt и свободное место для SDK, его исходников и результатов сборки.
+GitHub Actions запускает тесты и собирает APK с официальным SDK OpenWrt. ZIP с APK и его SHA-256 публикуется в артефактах запуска. Для локальной сборки на x86_64 Linux нужны Docker, доступ к GHCR и источникам пакетов OpenWrt, а также свободное место для SDK и промежуточных файлов.
 
 ```sh
 ./scripts/test.sh
 ./scripts/build-apk.sh
 ```
 
-Скрипт выбирает архив SDK из [официального списка SHA-256](https://downloads.openwrt.org/releases/25.12.6/targets/ramips/mt7621/sha256sums), проверяет хеш, использует feeds из SDK и кладёт APK и SHA-256 в `artifacts/`. Можно задать выходной каталог первым аргументом и число параллельных задач в `JOBS`.
+Скрипт запускает [официальный контейнер SDK](https://github.com/openwrt/docker-openwrt/pkgs/container/sdk) версии 25.12.6 для ramips/mt7621, фиксирует SHA-256 образа, использует feeds из SDK и кладёт APK и SHA-256 в `artifacts/`. Можно задать выходной каталог первым аргументом и число параллельных задач в `JOBS`.
 
 Имена зависимостей в OpenWrt SDK — `libpcap`, `libubox`, `libubus`, `luci-base` и `rpcd`. SDK разрешает ABI-суффиксы библиотек при упаковке. Сборка использует [исходники OpenWrt 25.12.6](https://github.com/openwrt/openwrt/tree/v25.12.6) через официальный SDK.
 
