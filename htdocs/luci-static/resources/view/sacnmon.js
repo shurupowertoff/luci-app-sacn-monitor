@@ -159,7 +159,7 @@ function channelViewer() {
 		const first = Number(range.value) * pageSize;
 		const rows = [];
 		for (let start = first; start < first + pageSize; start += columns) {
-			const cells = Array.from({ length: columns }, function(_, offset) {
+			const cells = Array.from({ length: columns }, function(unused, offset) {
 				const index = start + offset;
 				const value = index < levels.length ? levels[index] : null;
 				const attrs = { title: _('Channel %s').format(index + 1) };
