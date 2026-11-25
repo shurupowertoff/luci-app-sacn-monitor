@@ -115,61 +115,51 @@ function trafficChart() {
 }
 
 function channelViewer() {
-	const pageSize = 64;
-	const columns = 8;
 	const key = row => row.universe + '/' + row.cid;
 	let selected = '';
 	let choices = '';
 	let streams = [];
-	let levels = null;
 	let request = 0;
 
 	const select = E('select', { change: function() {
 		selected = select.value;
-		range.value = '0';
+		viewport.scrollTop = 0;
 		update();
 	} });
-	const range = E('select', { change: draw }, Array.from({ length: 8 }, (_, i) =>
-		E('option', { value: i }, [(i * pageSize + 1) + '–' + ((i + 1) * pageSize)])));
 	const caption = E('p');
-	const tbody = E('tbody');
-	const table = E('table', { 'class': 'sacn-channels', 'aria-label': _('DMX channel values') }, [
-		E('thead', {}, [E('tr', {}, [
-			E('th', { scope: 'col' }, [_('Channels')]),
-			...Array.from({ length: columns }, (_, i) => E('th', { scope: 'col' }, ['+' + i]))
-		])]), tbody
-	]);
+	const cells = Array.from({ length: 512 }, (unused, index) => {
+		const value = E('strong');
+		const cell = E('li', { 'class': 'sacn-slot', title: _('Channel %s').format(index + 1) }, [
+			E('span', { 'class': 'sacn-address' }, [String(index + 1)]), value
+		]);
+		return { cell, value, level: undefined };
+	});
+	const viewport = E('div', {
+		'class': 'sacn-channel-scroll', tabindex: '0', role: 'region', 'aria-label': _('DMX channels 1–512')
+	}, [E('ol', { 'class': 'sacn-channel-grid', role: 'list' }, cells.map(slot => slot.cell))]);
 	const node = E('section', { 'class': 'sacn-panel' }, [
 		E('h3', {}, [_('DMX channel values')]),
 		E('div', { 'class': 'sacn-controls' }, [
-			E('label', {}, [_('Universe / source'), ' ', select]),
-			E('label', {}, [_('Channel range'), ' ', range])
+			E('label', {}, [_('Universe / source'), ' ', select])
 		]),
 		caption,
-		E('div', { 'class': 'sacn-table-wrap' }, [table])
+		viewport
 	]);
 
-	function draw() {
-		table.hidden = levels == null || levels.length === 0;
-		range.disabled = table.hidden;
-		if (table.hidden) {
-			tbody.replaceChildren();
+	function draw(levels) {
+		viewport.hidden = !levels?.length;
+		if (viewport.hidden)
 			return;
+		for (let index = 0; index < cells.length; index++) {
+			const slot = cells[index];
+			const level = levels[index] ?? null;
+			if (slot.level === level)
+				continue;
+			slot.level = level;
+			slot.value.textContent = level == null ? '—' : String(level);
+			slot.cell.classList.toggle('sacn-slot-missing', level == null);
+			slot.cell.style.setProperty('--sacn-level', ((level ?? 0) * 100 / 255) + '%');
 		}
-		const first = Number(range.value) * pageSize;
-		const rows = [];
-		for (let start = first; start < first + pageSize; start += columns) {
-			const cells = Array.from({ length: columns }, function(unused, offset) {
-				const index = start + offset;
-				const value = index < levels.length ? levels[index] : null;
-				const attrs = { title: _('Channel %s').format(index + 1) };
-				if (value > 0)
-					attrs.style = 'box-shadow: inset 0 -0.16rem 0 rgba(36, 143, 186, ' + (0.2 + 0.8 * value / 255) + ')';
-				return E('td', attrs, [value == null ? '—' : String(value)]);
-			});
-			rows.push(E('tr', {}, [E('th', { scope: 'row' }, [String(start + 1)]), ...cells]));
-		}
-		tbody.replaceChildren(...rows);
 	}
 
 	async function update() {
@@ -179,8 +169,7 @@ function channelViewer() {
 			caption.dataset.stream = selected;
 			caption.textContent = stream ? _('Loading channels…') :
 				selected ? _('Selected stream is unavailable') : _('Waiting for an sACN stream');
-			levels = null;
-			draw();
+			draw(null);
 		}
 		if (!stream)
 			return;
@@ -188,13 +177,13 @@ function channelViewer() {
 		if (ticket !== request)
 			return;
 		const hex = result?.levels;
-		levels = typeof hex === 'string' && /^(?:[0-9a-f]{2}){0,512}$/.test(hex) ?
+		const levels = typeof hex === 'string' && /^(?:[0-9a-f]{2}){0,512}$/.test(hex) ?
 			Array.from(hex.match(/../g) || [], pair => parseInt(pair, 16)) : null;
 		caption.textContent = levels == null ? _('Channel values unavailable') :
 			(levels.length ? _('%s DMX channels · values 0–255').format(number(levels.length)) :
 				_('This packet contains no DMX channels')) +
 			(result.active ? '' : ' · ' + _('Inactive. Showing last received values.'));
-		draw();
+		draw(levels);
 	}
 
 	return { node, refresh: function(rows) {
@@ -374,9 +363,20 @@ return view.extend({
 				.sacnmon .sacn-panel canvas { display: block; width: 100%; height: 9rem; }
 				.sacnmon .sacn-chart-labels { display: flex; flex-wrap: wrap; justify-content: space-between; gap: .35rem; }
 				.sacnmon .sacn-controls select { max-width: min(65vw, 28rem); }
-				.sacnmon .sacn-channels { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
-				.sacnmon .sacn-channels th, .sacnmon .sacn-channels td { padding: .33rem .18rem; text-align: center; }
-				.sacnmon .sacn-channels tr { border-bottom: 1px solid rgba(128, 128, 128, .25); }
+				.sacnmon .sacn-channel-scroll { max-height: 30rem; overflow: auto; padding: .15rem; }
+				.sacnmon .sacn-channel-scroll[hidden] { display: none; }
+				.sacnmon .sacn-channel-grid { display: grid; grid-template-columns: repeat(20, minmax(0, 1fr)); gap: .2rem; margin: 0; padding: 0; list-style: none; }
+				.sacnmon .sacn-slot { min-width: 0; margin: 0; padding: .2rem .15rem .32rem; border-radius: .25rem; text-align: center; background: rgba(128, 128, 128, .12); font-variant-numeric: tabular-nums; line-height: 1.15; }
+				.sacnmon .sacn-slot .sacn-address { display: block; font-size: .72rem; }
+				.sacnmon .sacn-slot strong { display: block; margin-top: .08rem; font-size: .95rem; }
+				.sacnmon .sacn-slot::after { content: ''; display: block; width: var(--sacn-level, 0%); height: .2rem; margin-top: .15rem; border-radius: .15rem; background: #21a366; }
+				.sacnmon .sacn-slot-missing { opacity: .62; }
+				@media (max-width: 1150px) {
+					.sacnmon .sacn-channel-grid { grid-template-columns: repeat(10, minmax(0, 1fr)); }
+				}
+				@media (max-width: 480px) {
+					.sacnmon .sacn-channel-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+				}
 				@media (max-width: 760px) {
 					.sacnmon .sacn-mobile-sort { display: flex; flex-wrap: wrap; gap: .5rem; }
 					.sacnmon .sacn-table thead { display: none; }
