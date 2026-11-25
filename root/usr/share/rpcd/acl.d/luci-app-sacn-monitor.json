@@ -3,7 +3,7 @@
 		"description": "Access SACNMON",
 		"read": {
 			"ubus": {
-				"sacnmon": [ "stats" ],
+				"sacnmon": [ "stats", "channels" ],
 				"sacnmon.control": [ "status" ],
 				"luci-rpc": [ "getNetworkDevices" ]
 			},

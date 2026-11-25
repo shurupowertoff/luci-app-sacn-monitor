@@ -37,7 +37,10 @@ static void test_parser(void)
 	uint8_t data[639];
 	struct sacn_packet p;
 	fixture(data, 638);
+	data[127] = 72;
+	data[637] = 255;
 	assert(sacn_parse(data, 638, &p));
+	assert(p.slot_count == 512 && p.slots[0] == 0 && p.slots[1] == 72 && p.slots[511] == 255);
 	assert(p.cid[0] == 1 && p.universe == 42 && p.priority == 100 && p.sequence == 255);
 	assert(!strcmp(p.name, "Lighting console") && !p.terminated);
 	for (size_t len = 0; len < 638; len++)
@@ -62,8 +65,13 @@ static void test_parser(void)
 	assert(!sacn_parse(data, 638, &p));
 	put16(data + 113, 63999);
 	assert(sacn_parse(data, 638, &p));
+	fixture(data, 128);
+	data[127] = 31;
+	assert(sacn_parse(data, 128, &p));
+	assert(p.slot_count == 2 && p.slots[1] == 31 && p.slots[511] == 0);
 	fixture(data, 126);
 	assert(sacn_parse(data, 126, &p));
+	assert(p.slot_count == 0 && p.slots[1] == 0);
 	data[112] = 0x40;
 	assert(sacn_parse(data, 126, &p) && p.terminated);
 }
@@ -107,15 +115,20 @@ static void test_frames(void)
 static void test_streams(void)
 {
 	struct sacn_state state = {0};
-	struct sacn_packet a = { .cid = {1}, .universe = 42, .sequence = 254 };
-	struct sacn_packet b = { .cid = {2}, .universe = 42, .sequence = 100 };
+	struct sacn_packet a = { .cid = {1}, .universe = 42, .sequence = 254, .slot_count = 2, .slots = {0, 255} };
+	struct sacn_packet b = { .cid = {2}, .universe = 42, .sequence = 100, .slot_count = 1, .slots = {71} };
 	sacn_record(&state, &a, 1, 1000);
 	sacn_record(&state, &b, 1, 1001);
 	sacn_record(&state, &b, 2, 1002);
 	sacn_record(&state, &b, 2, 1003);
 	assert(state.streams[1].ip == 2 && state.streams[1].discontinuities == 2);
+	assert(state.streams[0].packet.slot_count == 2 && state.streams[0].packet.slots[1] == 255);
+	assert(state.streams[1].packet.slot_count == 1 && state.streams[1].packet.slots[0] == 71);
 	a.sequence = 255;
+	a.slot_count = 1;
+	a.slots[0] = 42;
 	sacn_record(&state, &a, 1, 1010);
+	assert(state.streams[0].packet.slot_count == 1 && state.streams[0].packet.slots[0] == 42);
 	a.sequence = 0;
 	sacn_record(&state, &a, 1, 1020);
 	assert(state.streams[0].discontinuities == 0);

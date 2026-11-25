@@ -8,6 +8,9 @@
 'require ui';
 
 const stats = rpc.declare({ object: 'sacnmon', method: 'stats', reject: true });
+const channels = rpc.declare({
+	object: 'sacnmon', method: 'channels', params: ['cid', 'universe'], reject: true
+});
 const status = rpc.declare({ object: 'sacnmon.control', method: 'status', reject: true });
 const devices = rpc.declare({ object: 'luci-rpc', method: 'getNetworkDevices', expect: { '': {} } });
 const actions = Object.fromEntries(['start', 'stop', 'enable', 'disable'].map(function(method) {
@@ -48,6 +51,173 @@ function compare(left, right, key) {
 	return Number(left[key]) - Number(right[key]);
 }
 
+function trafficChart() {
+	const windowMs = 120000;
+	const points = [];
+	const graph = E('canvas', { width: 720, height: 144, role: 'img', 'aria-label': _('Traffic history') });
+	const peak = E('span');
+	const current = E('strong');
+	const ctx = graph.getContext('2d');
+	const node = E('section', { 'class': 'sacn-panel' }, [
+		E('h3', {}, [_('sACN traffic')]),
+		E('div', { 'class': 'sacn-chart-labels' }, [current, peak]),
+		graph,
+		E('div', { 'class': 'sacn-chart-labels' }, [_('2 minutes ago'), _('Now')])
+	]);
+
+	return { node, update: function(pps) {
+		const now = performance.now();
+		points.push({ time: now, pps });
+		while (points.length > 61 || points[0].time < now - windowMs)
+			points.shift();
+		const values = points.filter(point => point.pps != null);
+		const max = Math.max(1, ...values.map(point => point.pps));
+		current.textContent = _('%s packets/s').format(number(pps));
+		peak.textContent = values.length ? _('Peak: %s packets/s').format(number(Math.max(...values.map(point => point.pps)))) : '';
+		graph.setAttribute('aria-label', [_('Traffic history'), current.textContent, peak.textContent].join(' · '));
+		if (!ctx)
+			return;
+		const width = graph.width;
+		const height = graph.height;
+		const left = 2, right = width - 2, top = 3, bottom = height - 3;
+		ctx.clearRect(0, 0, width, height);
+		ctx.strokeStyle = getComputedStyle(graph).color || '#808080';
+		ctx.globalAlpha = 0.22;
+		ctx.lineWidth = 1;
+		ctx.beginPath();
+		for (const y of [top, (top + bottom) / 2, bottom]) {
+			ctx.moveTo(left, y);
+			ctx.lineTo(right, y);
+		}
+		ctx.stroke();
+		ctx.globalAlpha = 1;
+		ctx.strokeStyle = '#248fba';
+		ctx.fillStyle = ctx.strokeStyle;
+		ctx.lineWidth = 2.5;
+		ctx.beginPath();
+		let previous = null;
+		for (const point of points) {
+			if (point.pps == null) {
+				previous = null;
+				continue;
+			}
+			const x = right - (now - point.time) / windowMs * (right - left);
+			const y = bottom - point.pps / max * (bottom - top);
+			ctx.fillRect(x - 1, y - 1, 2, 2);
+			if (previous != null && point.time - previous <= 5000)
+				ctx.lineTo(x, y);
+			else
+				ctx.moveTo(x, y);
+			previous = point.time;
+		}
+		ctx.stroke();
+	} };
+}
+
+function channelViewer() {
+	const pageSize = 64;
+	const columns = 8;
+	const key = row => row.universe + '/' + row.cid;
+	let selected = '';
+	let choices = '';
+	let streams = [];
+	let levels = null;
+	let request = 0;
+
+	const select = E('select', { change: function() {
+		selected = select.value;
+		range.value = '0';
+		update();
+	} });
+	const range = E('select', { change: draw }, Array.from({ length: 8 }, (_, i) =>
+		E('option', { value: i }, [(i * pageSize + 1) + '–' + ((i + 1) * pageSize)])));
+	const caption = E('p');
+	const tbody = E('tbody');
+	const table = E('table', { 'class': 'sacn-channels', 'aria-label': _('DMX channel values') }, [
+		E('thead', {}, [E('tr', {}, [
+			E('th', { scope: 'col' }, [_('Channels')]),
+			...Array.from({ length: columns }, (_, i) => E('th', { scope: 'col' }, ['+' + i]))
+		])]), tbody
+	]);
+	const node = E('section', { 'class': 'sacn-panel' }, [
+		E('h3', {}, [_('DMX channel values')]),
+		E('div', { 'class': 'sacn-controls' }, [
+			E('label', {}, [_('Universe / source'), ' ', select]),
+			E('label', {}, [_('Channel range'), ' ', range])
+		]),
+		caption,
+		E('div', { 'class': 'sacn-table-wrap' }, [table])
+	]);
+
+	function draw() {
+		table.hidden = levels == null || levels.length === 0;
+		range.disabled = table.hidden;
+		if (table.hidden) {
+			tbody.replaceChildren();
+			return;
+		}
+		const first = Number(range.value) * pageSize;
+		const rows = [];
+		for (let start = first; start < first + pageSize; start += columns) {
+			const cells = Array.from({ length: columns }, function(_, offset) {
+				const index = start + offset;
+				const value = index < levels.length ? levels[index] : null;
+				const attrs = { title: _('Channel %s').format(index + 1) };
+				if (value > 0)
+					attrs.style = 'box-shadow: inset 0 -0.16rem 0 rgba(36, 143, 186, ' + (0.2 + 0.8 * value / 255) + ')';
+				return E('td', attrs, [value == null ? '—' : String(value)]);
+			});
+			rows.push(E('tr', {}, [E('th', { scope: 'row' }, [String(start + 1)]), ...cells]));
+		}
+		tbody.replaceChildren(...rows);
+	}
+
+	async function update() {
+		const ticket = ++request;
+		const stream = streams.find(row => key(row) === selected);
+		if (!stream || caption.dataset.stream !== selected) {
+			caption.dataset.stream = selected;
+			caption.textContent = stream ? _('Loading channels…') :
+				selected ? _('Selected stream is unavailable') : _('Waiting for an sACN stream');
+			levels = null;
+			draw();
+		}
+		if (!stream)
+			return;
+		const result = await channels(stream.cid, stream.universe).catch(() => null);
+		if (ticket !== request)
+			return;
+		const hex = result?.levels;
+		levels = typeof hex === 'string' && /^(?:[0-9a-f]{2}){0,512}$/.test(hex) ?
+			Array.from(hex.match(/../g) || [], pair => parseInt(pair, 16)) : null;
+		caption.textContent = levels == null ? _('Channel values unavailable') :
+			(levels.length ? _('%s DMX channels · values 0–255').format(number(levels.length)) :
+				_('This packet contains no DMX channels')) +
+			(result.active ? '' : ' · ' + _('Inactive. Showing last received values.'));
+		draw();
+	}
+
+	return { node, refresh: function(rows) {
+		streams = rows.slice().sort((a, b) => a.universe - b.universe || compare(a, b, 'cid'));
+		if (!selected && streams.length)
+			selected = key(streams.find(row => row.active) || streams[0]);
+		const options = streams.map(row => [
+			key(row), 'U' + row.universe + ' · ' + (row.name || row.cid) + ' · ' + row.ip +
+				(row.active ? '' : ' · ' + _('Inactive'))
+		]);
+		if (selected && !options.some(option => option[0] === selected))
+			options.unshift([selected, _('Selected stream is unavailable')]);
+		const signature = JSON.stringify(options);
+		if (signature !== choices) {
+			choices = signature;
+			select.replaceChildren(...options.map(([value, text]) => E('option', { value }, [text])));
+			select.value = selected;
+		}
+		select.disabled = options.length === 0;
+		return update();
+	} };
+}
+
 return view.extend({
 	load: function() {
 		return Promise.all([uci.load('sacnmon'), devices().catch(() => ({})), status().catch(() => null)]);
@@ -64,6 +234,8 @@ return view.extend({
 		const daemon = E('strong');
 		const boot = E('span');
 		const body = E('tbody');
+		const chart = trafficChart();
+		const viewer = channelViewer();
 		const cards = [
 			['active_sources', _('Active sources')],
 			['active_universes', _('Active universes')],
@@ -137,6 +309,8 @@ return view.extend({
 					(method === 'stop' && info && !snapshot && !info.running) ||
 					(method === 'enable' && info?.enabled) || (method === 'disable' && info && !info.enabled);
 			drawRows();
+			chart.update(snapshot?.capturing ? snapshot.pps : null);
+			await viewer.refresh(snapshot?.streams || []);
 		}
 
 		if (L.hasViewPermission()) {
@@ -196,6 +370,13 @@ return view.extend({
 				.sacnmon .sacn-active { border-color: #21a366; }
 				.sacnmon .sacn-inactive { border-color: #d18717; }
 				.sacnmon .sacn-mobile-sort { display: none; }
+				.sacnmon .sacn-panel { padding: .8rem; border: 1px solid; border-radius: .4rem; margin: 1rem 0; }
+				.sacnmon .sacn-panel canvas { display: block; width: 100%; height: 9rem; }
+				.sacnmon .sacn-chart-labels { display: flex; flex-wrap: wrap; justify-content: space-between; gap: .35rem; }
+				.sacnmon .sacn-controls select { max-width: min(65vw, 28rem); }
+				.sacnmon .sacn-channels { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+				.sacnmon .sacn-channels th, .sacnmon .sacn-channels td { padding: .33rem .18rem; text-align: center; }
+				.sacnmon .sacn-channels tr { border-bottom: 1px solid rgba(128, 128, 128, .25); }
 				@media (max-width: 760px) {
 					.sacnmon .sacn-mobile-sort { display: flex; flex-wrap: wrap; gap: .5rem; }
 					.sacnmon .sacn-table thead { display: none; }
@@ -210,6 +391,8 @@ return view.extend({
 			E('div', {}, [_('Daemon'), ' · ', daemon]),
 			controls,
 			E('div', { 'class': 'sacn-summary' }, cards.map(card => card.node)),
+			chart.node,
+			viewer.node,
 			E('div', { 'class': 'sacn-mobile-sort' }, [
 				E('label', {}, [_('Sort by'), ' ', sort]),
 				E('button', { type: 'button', 'class': 'btn', click: function() {

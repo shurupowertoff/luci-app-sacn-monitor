@@ -147,7 +147,59 @@ static int get_stats(struct ubus_context *ctx, struct ubus_object *obj,
 	return 0;
 }
 
-static const struct ubus_method methods[] = { UBUS_METHOD_NOARG("stats", get_stats) };
+enum { CHANNELS_CID, CHANNELS_UNIVERSE, CHANNELS_FIELDS };
+static const struct blobmsg_policy channel_policy[CHANNELS_FIELDS] = {
+	[CHANNELS_CID] = { .name = "cid", .type = BLOBMSG_TYPE_STRING },
+	[CHANNELS_UNIVERSE] = { .name = "universe", .type = BLOBMSG_TYPE_INT32 },
+};
+
+static int get_channels(struct ubus_context *ctx, struct ubus_object *obj,
+			struct ubus_request_data *req, const char *method, struct blob_attr *msg)
+{
+	(void)obj;
+	(void)method;
+
+	struct blob_attr *fields[CHANNELS_FIELDS];
+	if (!msg || blobmsg_parse(channel_policy, CHANNELS_FIELDS, fields, blob_data(msg), blob_len(msg)) ||
+	    !fields[CHANNELS_CID] || !fields[CHANNELS_UNIVERSE])
+		return UBUS_STATUS_INVALID_ARGUMENT;
+
+	const char *cid = blobmsg_get_string(fields[CHANNELS_CID]);
+	uint32_t universe = blobmsg_get_u32(fields[CHANNELS_UNIVERSE]);
+	if (strlen(cid) != 36 || universe < 1 || universe > 63999)
+		return UBUS_STATUS_INVALID_ARGUMENT;
+
+	for (size_t i = 0; i < SACN_MAX_STREAMS; i++) {
+		const struct sacn_stream *s = &state.streams[i];
+		if (!s->used || s->packet.universe != universe)
+			continue;
+		char current_cid[37];
+		cid_string(s->packet.cid, current_cid);
+		if (strcmp(current_cid, cid))
+			continue;
+
+		static const char hex[] = "0123456789abcdef";
+		char levels[SACN_DMX_SLOTS * 2 + 1];
+		for (size_t j = 0; j < s->packet.slot_count; j++) {
+			levels[j * 2] = hex[s->packet.slots[j] >> 4];
+			levels[j * 2 + 1] = hex[s->packet.slots[j] & 15];
+		}
+		levels[s->packet.slot_count * 2] = '\0';
+		uint64_t now = monotonic_ms();
+		blob_buf_init(&reply, 0);
+		blobmsg_add_string(&reply, "levels", levels);
+		blobmsg_add_u8(&reply, "active", sacn_active(s, now));
+		blobmsg_add_u64(&reply, "age_ms", now - s->last_ms);
+		ubus_send_reply(ctx, req, reply.head);
+		return 0;
+	}
+	return UBUS_STATUS_NOT_FOUND;
+}
+
+static const struct ubus_method methods[] = {
+	UBUS_METHOD_NOARG("stats", get_stats),
+	UBUS_METHOD("channels", get_channels, channel_policy),
+};
 static struct ubus_object_type object_type = UBUS_OBJECT_TYPE("sacnmon", methods);
 static struct ubus_object object = {
 	.name = "sacnmon",

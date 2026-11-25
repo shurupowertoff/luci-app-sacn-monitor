@@ -15,7 +15,7 @@ static bool pdu(const uint8_t *p, size_t len)
 bool sacn_parse(const uint8_t *d, size_t len, struct sacn_packet *p)
 {
 	static const uint8_t identifier[12] = "ASC-E1.17";
-	if (len < 126 || len > 638 || be16(d) != 16 || be16(d + 2) ||
+	if (len < 126 || len > 126 + SACN_DMX_SLOTS || be16(d) != 16 || be16(d + 2) ||
 	    memcmp(d + 4, identifier, sizeof(identifier)))
 		return false;
 
@@ -38,6 +38,9 @@ bool sacn_parse(const uint8_t *d, size_t len, struct sacn_packet *p)
 	p->priority = d[108];
 	p->sequence = d[111];
 	p->terminated = (d[112] & 0x40) != 0;
+	p->slot_count = len - 126;
+	memcpy(p->slots, d + 126, p->slot_count);
+	memset(p->slots + p->slot_count, 0, sizeof(p->slots) - p->slot_count);
 	return true;
 }
 

@@ -8,6 +8,7 @@
 
 #define SACN_MAX_STREAMS 256
 #define SACN_TIMEOUT_MS 2500
+#define SACN_DMX_SLOTS 512
 
 struct sacn_packet {
 	uint8_t cid[16];
@@ -16,6 +17,8 @@ struct sacn_packet {
 	uint8_t priority;
 	uint8_t sequence;
 	bool terminated;
+	uint16_t slot_count;
+	uint8_t slots[SACN_DMX_SLOTS];
 };
 
 struct sacn_stream {
