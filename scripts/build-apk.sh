@@ -15,7 +15,7 @@ container=$(docker create --platform linux/amd64 -i -e JOBS="${JOBS:-2}" "$image
 
 	# Use the feed revisions shipped with the SDK.
 	./scripts/feeds update base packages luci
-	./scripts/feeds install luci-base
+	./scripts/feeds install libpcap libubox libubus luci-base rpcd
 	cat > .config <<CONFIG
 # CONFIG_ALL is not set
 # CONFIG_ALL_NONSHARED is not set
